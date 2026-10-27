@@ -70,7 +70,7 @@ const K={};addEventListener('keydown',e=>{if(e.repeat)return;K[e.code]=1;const k
 function btns(){const r=Math.min(W,H)*.085,y1=H-r*1.25,y2=H-r*3.6;const L=[],pl=[0,1];
  for(const i of pl){if(cpu&&i===1)continue;const side=i===0?0:W,s=i===0?1:-1;
   L.push({p:i,a:'l',x:side+s*r*1.3,y:y1,r,t:'◀'},{p:i,a:'r',x:side+s*r*3.7,y:y1,r,t:'▶'},
-   {p:i,a:'pl',x:side+s*r*1.3,y:y2,r,t:'L'},{p:i,a:'pr',x:side+s*r*3.7,y:y2,r,t:'R'},{p:i,a:'b',x:side+s*r*2.5,y:y2-r*2,r:r*.8,t:'⛨'})}
+   {p:i,a:'pl',x:side+s*r*1.5,y:y2-r*.2,r:r*1.3,t:'👊L'},{p:i,a:'pr',x:side+s*r*4.1,y:y2-r*.2,r:r*1.3,t:'R👊'},{p:i,a:'b',x:side+s*r*2.8,y:y2-r*2.6,r:r*.8,t:'⛨'})}
  return L}
 const touches={};
 function tdo(e){e.preventDefault();ac();const B=btns(),now={};
@@ -165,7 +165,7 @@ function draw(){const s=S;cx.save();if(shake>0)cx.translate((Math.random()-.5)*1
  if(state!=='fight'&&state!=='menu'){cx.font=`${Math.min(48*s,W/18)}px Impact`;cx.lineWidth=6*s;cx.strokeStyle='#111';cx.strokeText(msg,W/2,H*.25);cx.fillStyle='#ffd23f';cx.fillText(msg,W/2,H*.25);
   if(state!=='ready'){cx.font=`${20*s}px Arial`;cx.fillStyle='#fff';cx.fillText(state==='over'?'Tap / Space: push head down & new match':'Tap / Space: push the head back down',W/2,H*.25+40*s)}}
  // touch buttons
- if(('ontouchstart' in window)&&state!=='menu')for(const b of btns()){cx.globalAlpha=touches[b.p+b.a]?.85:.45;cx.fillStyle=b.p?'#1f6fd1':'#d62828';cx.beginPath();cx.arc(b.x,b.y,b.r,0,7);cx.fill();cx.globalAlpha=1;cx.fillStyle='#fff';cx.font=`${b.r*.8}px Arial`;cx.textBaseline='middle';cx.fillText(b.t,b.x,b.y);cx.textBaseline='alphabetic'}}
+ if((('ontouchstart' in window)||navigator.maxTouchPoints>0)&&state!=='menu')for(const b of btns()){cx.globalAlpha=touches[b.p+b.a]?.85:.45;cx.fillStyle=b.p?'#1f6fd1':'#d62828';cx.beginPath();cx.arc(b.x,b.y,b.r,0,7);cx.fill();cx.globalAlpha=1;cx.fillStyle='#fff';cx.font=`${b.r*.6}px Arial`;cx.textBaseline='middle';cx.fillText(b.t,b.x,b.y);cx.textBaseline='alphabetic'}}
 function loop(t){const dt=Math.min(.05,(t-last)/1000);last=t;upd(dt);draw();requestAnimationFrame(loop)}requestAnimationFrame(loop);
 window.__game={P,punch,resolve,score:()=>score,start,state:()=>state,pushDown,ko};
 </script></body></html>
