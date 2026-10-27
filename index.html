@@ -1,0 +1,171 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Knock 'Em Block 'Em Bots</title>
+<style>
+html,body{margin:0;height:100%;background:#1b1b2b;overflow:hidden;font-family:Impact,'Arial Black',sans-serif;touch-action:none;user-select:none;-webkit-user-select:none}
+canvas{display:block;width:100vw;height:100vh}
+#menu{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(15,15,30,.88);color:#ffd23f;text-align:center;z-index:5}
+#menu h1{font-size:min(9vw,64px);margin:.2em;text-shadow:4px 4px 0 #c0392b,8px 8px 0 #2471a3}
+#menu button{font:inherit;font-size:min(5vw,26px);margin:6px;padding:10px 22px;border:4px solid #111;border-radius:14px;background:#ffd23f;color:#111;box-shadow:0 6px 0 #9a7b00;cursor:pointer}
+#menu button:active{transform:translateY(4px);box-shadow:0 2px 0 #9a7b00}
+#menu p{color:#ddd;font-family:Arial,sans-serif;font-size:min(3.4vw,15px);max-width:640px;line-height:1.4}
+.sel{background:#fff!important}
+</style></head><body>
+<canvas id="c"></canvas>
+<div id="menu"><h1>KNOCK 'EM<br>BLOCK 'EM BOTS</h1>
+<div><button id="b2">2 PLAYERS</button><button id="b1">VS CPU</button></div>
+<div id="diff">CPU: <button data-d="0">EASY</button><button data-d="1" class="sel">MEDIUM</button><button data-d="2">HARD</button></div>
+<p><b>Red Robot:</b> A/D lean · Q left punch · E right punch · S block<br>
+<b>Blue Robot:</b> ←/→ lean · , left punch · . right punch · ↓ block<br>
+Touch: each player gets buttons on their side. Pop the head to win the round! Best of 3. Tap the popped head (or Space) to push it back down.</p></div>
+<script>
+"use strict";
+const cv=document.getElementById('c'),cx=cv.getContext('2d');
+let W,H,S;function rs(){W=cv.width=innerWidth*devicePixelRatio;H=cv.height=innerHeight*devicePixelRatio;S=Math.min(W/1000,H/620)}addEventListener('resize',rs);rs();
+// ---------- AUDIO ----------
+let AC=null;function ac(){if(!AC){try{AC=new (window.AudioContext||window.webkitAudioContext)()}catch(e){}}if(AC&&AC.state==='suspended')AC.resume();return AC}
+function noise(d,f,q,v,t0=0){const a=ac();if(!a)return;const t=a.currentTime+t0,b=a.createBuffer(1,a.sampleRate*d,a.sampleRate),c=b.getChannelData(0);for(let i=0;i<c.length;i++)c[i]=(Math.random()*2-1)*Math.pow(1-i/c.length,3);const s=a.createBufferSource();s.buffer=b;const fl=a.createBiquadFilter();fl.type='bandpass';fl.frequency.value=f;fl.Q.value=q;const g=a.createGain();g.gain.value=v;s.connect(fl).connect(g).connect(a.destination);s.start(t)}
+function tone(f1,f2,d,type,v,t0=0){const a=ac();if(!a)return;const t=a.currentTime+t0,o=a.createOscillator(),g=a.createGain();o.type=type;o.frequency.setValueAtTime(f1,t);o.frequency.exponentialRampToValueAtTime(f2,t+d);g.gain.setValueAtTime(v,t);g.gain.exponentialRampToValueAtTime(.001,t+d);o.connect(g).connect(a.destination);o.start(t);o.stop(t+d)}
+const SFX={
+ clack(){noise(.05,2500,3,.5);tone(900,300,.04,'square',.08)},          // plunger
+ thunk(){tone(180,60,.12,'sine',.7);noise(.08,700,2,.6)},                // plastic hit
+ block(){noise(.06,1600,5,.5);tone(400,250,.05,'triangle',.25)},
+ whiff(){noise(.12,500,1,.15)},
+ ratchet(n=6){for(let i=0;i<n;i++)noise(.02,3500,8,.4,i*.035)},
+ boing(){tone(160,620,.45,'triangle',.35);tone(240,900,.35,'sine',.2,.03)},
+ lean(){noise(.03,1200,6,.08)},
+ bell(){[0,.25,.5].forEach(t=>{tone(1250,1240,.9,'sine',.25,t);tone(2500,2480,.5,'sine',.1,t)})}
+};
+// ---------- GAME ----------
+const P=[mk(0),mk(1)];let score=[0,0],round=1,state='menu',msg='',msgT=0,cpu=false,diff=1,cpuT=0,shake=0;
+function mk(i){return{i,lean:0,lt:0,arm:[0,0],cd:[0,0],block:false,hp:0,pop:0,popped:false,stun:0,flash:0,in:{l:0,r:0,pl:0,pr:0,b:0}}}
+function reset(){for(const p of P){Object.assign(p,mk(p.i))}}
+function punch(p,h){if(state!=='fight'||p.popped||p.stun>0||p.cd[h]>0||p.block)return;p.arm[h]=1;p.cd[h]=.55;SFX.clack();
+ const o=P[1-p.i];// geometric hit: fist lane depends on own lean & hand; head pos on other's lean
+ setTimeout(()=>resolve(p,o,h),110)}
+function resolve(p,o,h){if(state!=='fight')return;
+ // lane: from attacker's view, hand h=0 left, 1 right. Map to screen x offset.
+ const dir=p.i===0?1:-1; // red faces right
+ const lane=p.lean*0.6+(h===0?-.35:.35)*(p.i===0?1:-1); // lateral (screen y-ish depth -> we use lateral)
+ const head=o.lean*0.6;const d=Math.abs(lane-head);
+ if(o.block&&d<.9){SFX.block();o.flash=.1;return}
+ if(d<.42){const jaw=d<.18;o.hp+=jaw?34:20;o.stun=.18;o.flash=.2;shake=.15;SFX.thunk();
+  if(o.hp>=100||(jaw&&o.hp>=70&&Math.random()<.5))ko(o)}else SFX.whiff()}
+function ko(o){o.popped=true;state='ko';SFX.boing();setTimeout(()=>SFX.ratchet(8),150);const w=1-o.i;score[w]++;
+ msg=(w?'BLUE':'RED')+' ROBOT KNOCKS THE BLOCK OFF!';msgT=0;
+ if(score[w]>=2){state='over';msg=(w?'BLUE':'RED')+' ROBOT WINS THE MATCH!'}}
+function pushDown(){if(state==='ko'){SFX.ratchet(5);setTimeout(()=>{reset();round++;startRound()},250)}else if(state==='over'){SFX.ratchet(5);score=[0,0];round=1;reset();showMenu()}}
+function startRound(){state='ready';msg='ROUND '+round;msgT=0;setTimeout(()=>{if(state==='ready'){state='fight';SFX.bell()}},1300)}
+function start(c){cpu=c;score=[0,0];round=1;reset();document.getElementById('menu').style.display='none';ac();startRound()}
+function showMenu(){state='menu';document.getElementById('menu').style.display='flex'}
+document.getElementById('b2').onclick=()=>start(false);document.getElementById('b1').onclick=()=>start(true);
+document.querySelectorAll('[data-d]').forEach(b=>b.onclick=()=>{diff=+b.dataset.d;document.querySelectorAll('[data-d]').forEach(x=>x.classList.toggle('sel',x===b))});
+// keyboard
+const K={};addEventListener('keydown',e=>{if(e.repeat)return;K[e.code]=1;const k=e.code;ac();
+ if(k==='KeyQ')punch(P[0],0);if(k==='KeyE')punch(P[0],1);
+ if(!cpu){if(k==='Comma')punch(P[1],0);if(k==='Period')punch(P[1],1)}
+ if(k==='Space'||k==='Enter')pushDown();if(k==='Escape'){reset();showMenu()}
+ if(/Arrow|Space/.test(k))e.preventDefault()});addEventListener('keyup',e=>K[e.code]=0);
+// touch buttons (layout in canvas px)
+function btns(){const r=Math.min(W,H)*.085,y1=H-r*1.25,y2=H-r*3.6;const L=[],pl=[0,1];
+ for(const i of pl){if(cpu&&i===1)continue;const side=i===0?0:W,s=i===0?1:-1;
+  L.push({p:i,a:'l',x:side+s*r*1.3,y:y1,r,t:'◀'},{p:i,a:'r',x:side+s*r*3.7,y:y1,r,t:'▶'},
+   {p:i,a:'pl',x:side+s*r*1.3,y:y2,r,t:'L'},{p:i,a:'pr',x:side+s*r*3.7,y:y2,r,t:'R'},{p:i,a:'b',x:side+s*r*2.5,y:y2-r*2,r:r*.8,t:'⛨'})}
+ return L}
+const touches={};
+function tdo(e){e.preventDefault();ac();const B=btns(),now={};
+ for(const t of e.touches){const x=t.clientX*devicePixelRatio,y=t.clientY*devicePixelRatio;for(const b of B)if(Math.hypot(x-b.x,y-b.y)<b.r*1.1)now[b.p+b.a]=b}
+ for(const k in now)if(!touches[k]){const b=now[k];if(b.a==='pl')punch(P[b.p],0);if(b.a==='pr')punch(P[b.p],1)}
+ for(const k in touches)delete touches[k];Object.assign(touches,now);
+ if(e.type==='touchstart'&&(state==='ko'||state==='over')&&!Object.keys(now).length)pushDown()}
+['touchstart','touchmove','touchend','touchcancel'].forEach(t=>cv.addEventListener(t,tdo,{passive:false}));
+cv.addEventListener('mousedown',e=>{if(state==='ko'||state==='over')pushDown()});
+function held(i,a){return !!touches[i+a]}
+// ---------- UPDATE ----------
+let last=performance.now();
+function upd(dt){
+ const I0={l:K.KeyA||held(0,'l'),r:K.KeyD||held(0,'r'),b:K.KeyS||held(0,'b')};
+ let I1={l:K.ArrowLeft||held(1,'l'),r:K.ArrowRight||held(1,'r'),b:K.ArrowDown||held(1,'b')};
+ if(cpu)I1=cpuAI(dt);
+ [[P[0],I0],[P[1],I1]].forEach(([p,I])=>{
+  const tgt=state==='fight'&&!p.popped?((I.r?1:0)-(I.l?1:0)):0;
+  if(tgt!==p.lt&&tgt!==0)SFX.lean();p.lt=tgt;
+  p.lean+=(tgt-p.lean)*Math.min(1,dt*9);p.block=state==='fight'&&!!I.b&&!p.popped;
+  for(let h=0;h<2;h++){p.arm[h]=Math.max(0,p.arm[h]-dt*5);p.cd[h]=Math.max(0,p.cd[h]-dt)}
+  p.stun=Math.max(0,p.stun-dt);p.flash=Math.max(0,p.flash-dt);p.hp=Math.max(0,p.hp-dt*3);
+  p.pop+=((p.popped?1:0)-p.pop)*Math.min(1,dt*14)});
+ shake=Math.max(0,shake-dt);msgT+=dt}
+function cpuAI(dt){const me=P[1],o=P[0],lv=[[.9,.35,.15],[.55,.6,.4],[.3,.85,.7]][diff];const I={l:0,r:0,b:0};
+ if(state!=='fight')return I;cpuT-=dt;
+ if(!me._l)me._l=0;
+ // dodge: move head away from opponent's fist lanes when opponent punching
+ const threat=o.arm[0]>.5||o.arm[1]>.5;
+ if(threat&&Math.random()<lv[2]*dt*20){if(Math.random()<.5)me._b=.3;else me._l=me.lean>0?-1:1}
+ if(cpuT<=0){cpuT=lv[0]*(.6+Math.random()*.8);
+  // aim: choose hand whose lane hits opponent head
+  let best=-1,bd=9;for(let h=0;h<2;h++){const lane=me.lean*.6+(h===0?-.35:.35)*-1;const d=Math.abs(lane-o.lean*.6);if(d<bd){bd=d;best=h}}
+  if(Math.random()<lv[1]&&bd<.42)punch(me,best);else{punch(me,Math.random()<.5?0:1);me._l=[-1,0,1][Math.floor(Math.random()*3)]}}
+ me._b=Math.max(0,(me._b||0)-dt);I.b=me._b>0;I.l=me._l<0;I.r=me._l>0;return I}
+// ---------- DRAW ----------
+function rr(x,y,w,h,r){cx.beginPath();cx.roundRect?cx.roundRect(x,y,w,h,r):cx.rect(x,y,w,h)}
+function robot(p){const red=p.i===0,col=red?'#d62828':'#1f6fd1',dk=red?'#7a1010':'#0d3a75',s=S;
+ const cxp=W/2+(red?-1:1)*150*s+p.lean*0*s,baseY=H*.5+110*s;
+ // lean is depth-lateral; render as sideways tilt+shift along ring (vertical on screen)
+ const off=p.lean*55*s*(red?1:-1);
+ cx.save();cx.translate(cxp,baseY+off*.25);
+ const dir=red?1:-1;cx.rotate(p.lean*.18*dir);
+ // pole & handle
+ cx.fillStyle='#555';cx.fillRect(-6*s,0,12*s,120*s);
+ // legs
+ cx.fillStyle=dk;rr(-38*s,-40*s,30*s,60*s,6*s);cx.fill();rr(8*s,-40*s,30*s,60*s,6*s);cx.fill();
+ // body
+ const g=cx.createLinearGradient(-60*s,0,60*s,0);g.addColorStop(0,dk);g.addColorStop(.4,col);g.addColorStop(1,dk);
+ cx.fillStyle=g;rr(-55*s,-150*s,110*s,115*s,18*s);cx.fill();cx.lineWidth=3*s;cx.strokeStyle='#111';cx.stroke();
+ cx.fillStyle='#ffd23f';for(let i=0;i<3;i++){cx.beginPath();cx.arc((-25+i*25)*s,-95*s,7*s,0,7);cx.fill()}
+ cx.fillStyle='#ccc';rr(-30*s,-130*s,60*s,14*s,4*s);cx.fill();
+ // arms: back(h) and front; punches extend toward center
+ for(let h=0;h<2;h++){const ext=p.arm[h]*95*s,yy=(h?-120:-105)*s,blk=p.block?1:0;
+  cx.save();cx.translate(dir*40*s,yy);cx.fillStyle=dk;rr(0,-11*s,dir*(45*s+ext),22*s,8*s);cx.fill();
+  const fx=dir*(50*s+ext)-(blk?dir*30*s:0),fy=blk?-65*s:0;
+  cx.fillStyle=col;cx.beginPath();cx.arc(fx,fy,22*s,0,7);cx.fill();cx.stroke();cx.restore()}
+ // neck spring + head
+ const pop=p.pop*85*s;
+ cx.strokeStyle='#bbb';cx.lineWidth=4*s;cx.beginPath();for(let i=0;i<=10;i++){const y=-150*s-i*(pop+10*s)/10;cx.lineTo((i%2?8:-8)*s,y)}cx.stroke();
+ cx.save();cx.translate(p.stun>0?(Math.random()-.5)*8*s:0,-165*s-pop);cx.rotate(p.pop*.35*dir);
+ cx.fillStyle=p.flash>0?'#fff':col;rr(-40*s,-70*s,80*s,70*s,14*s);cx.fill();cx.lineWidth=3*s;cx.strokeStyle='#111';cx.stroke();
+ cx.fillStyle='#ffd23f';cx.fillRect(-46*s,-48*s,6*s,22*s);cx.fillRect(40*s,-48*s,6*s,22*s);
+ cx.fillStyle='#111';cx.fillRect(-3*s,-86*s,6*s,16*s);cx.beginPath();cx.arc(0,-88*s,6*s,0,7);cx.fill();
+ cx.fillStyle=p.popped?'#ff0':'#fff';
+ cx.fillRect((dir*6-14)*s,-50*s,12*s,10*s);cx.fillRect((dir*6+6)*s,-50*s,12*s,10*s);
+ cx.fillStyle='#ddd';rr(-22*s,-28*s,44*s,16*s,4*s);cx.fill();cx.fillStyle='#111';for(let i=-2;i<=2;i++)cx.fillRect((i*8-1)*s,-28*s,2*s,16*s);
+ cx.restore();
+ // damage meter
+ cx.restore();
+ const mx=cxp-50*s,my=H*.08+40*s;cx.fillStyle='#222';cx.fillRect(mx,my,100*s,10*s);cx.fillStyle=p.hp>70?'#f33':'#fc3';cx.fillRect(mx,my,p.hp*s,10*s)}
+function draw(){const s=S;cx.save();if(shake>0)cx.translate((Math.random()-.5)*12*s,(Math.random()-.5)*12*s);
+ const bg=cx.createRadialGradient(W/2,H/2,50,W/2,H/2,W*.7);bg.addColorStop(0,'#3a3a5c');bg.addColorStop(1,'#141422');cx.fillStyle=bg;cx.fillRect(-20,-20,W+40,H+40);
+ // ring: raised yellow platform (perspective trapezoid)
+ const cy=H*.62,rw=460*s,rh=120*s;
+ cx.fillStyle='#b8860b';cx.beginPath();cx.moveTo(W/2-rw-30*s,cy+rh);cx.lineTo(W/2+rw+30*s,cy+rh);cx.lineTo(W/2+rw+30*s,cy+rh+60*s);cx.lineTo(W/2-rw-30*s,cy+rh+60*s);cx.fill();
+ cx.fillStyle='#ffd23f';cx.beginPath();cx.moveTo(W/2-rw*.8,cy-rh);cx.lineTo(W/2+rw*.8,cy-rh);cx.lineTo(W/2+rw+30*s,cy+rh);cx.lineTo(W/2-rw-30*s,cy+rh);cx.fill();cx.strokeStyle='#8a6500';cx.lineWidth=4*s;cx.stroke();
+ cx.fillStyle='rgba(0,0,0,.12)';for(let i=0;i<8;i++){cx.fillRect(W/2-rw+i*rw/4,cy-rh+5,3*s,rh*2-10)}
+ // posts & back ropes
+ const posts=[[W/2-rw*.8,cy-rh],[W/2+rw*.8,cy-rh],[W/2-rw-30*s,cy+rh],[W/2+rw+30*s,cy+rh]];
+ function ropes(a,b){for(let k=0;k<3;k++){cx.strokeStyle=['#e63946','#fff','#1d6fd1'][k];cx.lineWidth=5*s;cx.beginPath();cx.moveTo(a[0],a[1]-(40+k*35)*s);cx.lineTo(b[0],b[1]-(40+k*35)*s);cx.stroke()}}
+ ropes(posts[0],posts[1]);ropes(posts[0],posts[2]);ropes(posts[1],posts[3]);
+ for(const q of posts.slice(0,2)){cx.fillStyle='#ddd';cx.fillRect(q[0]-6*s,q[1]-150*s,12*s,150*s)}
+ robot(P[0]);robot(P[1]);
+ ropes(posts[2],posts[3]);for(const q of posts.slice(2)){cx.fillStyle='#eee';cx.fillRect(q[0]-8*s,q[1]-150*s,16*s,150*s)}
+ cx.restore();
+ // HUD
+ cx.textAlign='center';cx.font=`${32*s}px Impact,Arial Black`;
+ cx.fillStyle='#e63946';cx.fillText('RED '+'●'.repeat(score[0])+'○'.repeat(2-score[0]),W*.25,H*.08);
+ cx.fillStyle='#4ea3ff';cx.fillText('○'.repeat(2-score[1])+'●'.repeat(score[1])+' BLUE',W*.75,H*.08);
+ cx.fillStyle='#ffd23f';cx.font=`${22*s}px Impact`;cx.fillText('ROUND '+round+(cpu?'  ·  VS CPU':''),W/2,H*.08);
+ if(state!=='fight'&&state!=='menu'){cx.font=`${Math.min(48*s,W/18)}px Impact`;cx.lineWidth=6*s;cx.strokeStyle='#111';cx.strokeText(msg,W/2,H*.25);cx.fillStyle='#ffd23f';cx.fillText(msg,W/2,H*.25);
+  if(state!=='ready'){cx.font=`${20*s}px Arial`;cx.fillStyle='#fff';cx.fillText(state==='over'?'Tap / Space: push head down & new match':'Tap / Space: push the head back down',W/2,H*.25+40*s)}}
+ // touch buttons
+ if(('ontouchstart' in window)&&state!=='menu')for(const b of btns()){cx.globalAlpha=touches[b.p+b.a]?.85:.45;cx.fillStyle=b.p?'#1f6fd1':'#d62828';cx.beginPath();cx.arc(b.x,b.y,b.r,0,7);cx.fill();cx.globalAlpha=1;cx.fillStyle='#fff';cx.font=`${b.r*.8}px Arial`;cx.textBaseline='middle';cx.fillText(b.t,b.x,b.y);cx.textBaseline='alphabetic'}}
+function loop(t){const dt=Math.min(.05,(t-last)/1000);last=t;upd(dt);draw();requestAnimationFrame(loop)}requestAnimationFrame(loop);
+window.__game={P,punch,resolve,score:()=>score,start,state:()=>state,pushDown,ko};
+</script></body></html>
